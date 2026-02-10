@@ -214,3 +214,108 @@ export async function scrapeUrl(url: string, options: ScrapeOptions = {}): Promi
         console.log(`[🕵️ READER] Browser closed.`);
     }
 }
+
+
+// ============================================================
+// 🕷️ PHANTOM CRAWLER - Recursive Site-Wide Extraction
+// ============================================================
+
+export interface CrawlOptions {
+    maxPages?: number;      // Hard limit on pages to scrape (default: 10)
+    maxDepth?: number;      // How deep to follow links (default: 2)
+    render?: boolean;       // Load images/css for each page
+    screenshot?: boolean;   // Take screenshot of each page
+    allowSubdomains?: boolean; // Allow links to subdomains (default: false)
+}
+
+export interface CrawlResult {
+    pages: ScrapeResult[];
+    stats: {
+        pagesScraped: number;
+        linksDiscovered: number;
+        duration: number; // seconds
+    };
+}
+
+export async function crawlUrl(startUrl: string, options: CrawlOptions = {}): Promise<CrawlResult> {
+    const maxPages = options.maxPages ?? 10;
+    const maxDepth = options.maxDepth ?? 2;
+    const allowSubdomains = options.allowSubdomains ?? false;
+
+    const startTime = Date.now();
+    const visited = new Set<string>();
+    const queue: { url: string; depth: number }[] = [{ url: startUrl, depth: 0 }];
+    const results: ScrapeResult[] = [];
+    let linksDiscovered = 0;
+
+    const startDomain = new URL(startUrl).hostname;
+    console.log(`[🕷️ CRAWLER] Starting crawl of ${startUrl}`);
+
+    while (queue.length > 0 && results.length < maxPages) {
+        const current = queue.shift();
+        if (!current) break;
+
+        const { url, depth } = current;
+        if (visited.has(url) || depth > maxDepth) continue;
+        visited.add(url);
+
+        console.log(`[🕷️ CRAWLER] [${results.length + 1}/${maxPages}] Depth ${depth}: ${url}`);
+
+        try {
+            // Use our Phantom Scraper for every page
+            const result = await scrapeUrl(url, {
+                render: options.render,
+                screenshot: options.screenshot,
+                includeLinks: true // Vital for crawler
+            });
+            results.push(result);
+
+            if (depth >= maxDepth) continue;
+
+            const links = result.links || [];
+            const filteredLinks = filterLinks(links, url, startDomain, allowSubdomains);
+            linksDiscovered += filteredLinks.length;
+
+            for (const link of filteredLinks) {
+                if (!visited.has(link) && results.length + queue.length < maxPages * 2) {
+                    queue.push({ url: link, depth: depth + 1 });
+                }
+            }
+        } catch (err) {
+            console.error(`[🕷️ CRAWLER] Failed to scrape ${url}:`, err);
+        }
+    }
+
+    return {
+        pages: results,
+        stats: {
+            pagesScraped: results.length,
+            linksDiscovered,
+            duration: (Date.now() - startTime) / 1000
+        }
+    };
+}
+
+function filterLinks(rawLinks: string[], currentUrl: string, baseDomain: string, allowSubdomains: boolean): string[] {
+    const uniqueLinks = new Set<string>();
+    const normalizedBase = baseDomain.replace(/^www\./, '');
+
+    for (const href of rawLinks) {
+        try {
+            if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('javascript:')) continue;
+            const absoluteUrl = new URL(href, currentUrl).href;
+            const urlObj = new URL(absoluteUrl);
+            const currentHost = urlObj.hostname.replace(/^www\./, '');
+            const isSameDomain = currentHost === normalizedBase;
+            const isSubdomain = urlObj.hostname.endsWith(`.${normalizedBase}`);
+            if (isSameDomain || (allowSubdomains && isSubdomain)) {
+                // Simple filter to avoid assets
+                const path = urlObj.pathname.toLowerCase();
+                if (!path.endsWith('.png') && !path.endsWith('.jpg') && !path.endsWith('.pdf') && !path.endsWith('.zip')) {
+                    uniqueLinks.add(absoluteUrl);
+                }
+            }
+        } catch { }
+    }
+    return Array.from(uniqueLinks);
+}
