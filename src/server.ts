@@ -1,11 +1,25 @@
+/**
+ * ============================================================
+ * 🏗️ DANRIT ENGINE V2.0
+ * ============================================================
+ * Unified Microservice for:
+ *   - Web Scraping (Conqueror Mode)
+ *   - Site Crawling (Spider Mode)
+ *   - Video Intelligence (StreamJet)
+ * ============================================================
+ */
+
 import express, { Request, Response, NextFunction } from 'express';
 import { scrapeUrl, crawlUrl } from './scraper.js';
+import { getVideoInfo, getVideoStreamUrl, streamVideo } from './video.js';
 
 const app = express();
 const PORT = process.env.PORT || 3002;
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || ['*'];
 
-// --- Middleware ---
+// ============================================================
+// MIDDLEWARE
+// ============================================================
 
 // 1. CORS
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -14,7 +28,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
         res.setHeader('Access-Control-Allow-Origin', origin as string);
     }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
     if (req.method === 'OPTIONS') {
         res.sendStatus(204);
         return;
@@ -27,83 +41,58 @@ app.use(express.json());
 
 // 3. Request Logger
 app.use((req: Request, res: Response, next: NextFunction) => {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] ${req.method} ${req.path}`);
+    const ts = new Date().toISOString();
+    console.log(`[${ts}] ${req.method} ${req.path}`);
     next();
 });
 
-// --- Routes ---
+// ============================================================
+// ROUTES: HEALTH & STATUS
+// ============================================================
 
-// Health Check (for Load Balancers / Uptime Monitors)
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', uptime: process.uptime() });
+    res.json({ status: 'ok', uptime: process.uptime(), version: '2.0.0' });
 });
 
-// 1. The "Top Level" Status Page (UI)
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
         <html>
             <head>
-                <title>Danrit Reader</title>
+                <title>Danrit Engine V2</title>
                 <style>
-                    :root { --bg: #050505; --fg: #e0e0e0; --dim: #444; --border: #222; }
-                    * { box-sizing: border-box; }
-                    body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; height: 100vh; margin: 0; display: flex; align-items: center; justify-content: center; }
-                    .container { width: 100%; max-width: 480px; padding: 0; }
-                    .grid { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--border); }
-                    .cell { padding: 1.5rem; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); display: flex; flex-direction: column; justify-content: space-between; height: 140px; }
-                    .cell:nth-child(2n) { border-right: none; }
-                    .cell:last-child { border-bottom: none; border-right: none; grid-column: span 2; height: auto; flex-direction: row; align-items: center; }
-                    .label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin-bottom: 0.5rem; font-weight: 600; }
-                    .value { font-size: 1.2rem; font-weight: 400; letter-spacing: -0.5px; }
-                    .hero { grid-column: span 2; border-bottom: 1px solid var(--border); padding: 2rem; }
-                    h1 { margin: 0; font-size: 2rem; font-weight: 300; letter-spacing: -1px; }
-                    .status-dot { width: 8px; height: 8px; background: #fff; border-radius: 50%; margin-right: 10px; }
+                    :root { --bg: #050505; --fg: #e0e0e0; --dim: #555; --border: #1a1a1a; --accent: #00ff88; }
+                    * { box-sizing: border-box; margin: 0; }
+                    body { background: var(--bg); color: var(--fg); font-family: 'SF Mono', 'Fira Code', monospace; height: 100vh; display: flex; align-items: center; justify-content: center; }
+                    .card { border: 1px solid var(--border); padding: 3rem; max-width: 500px; width: 100%; }
+                    h1 { font-size: 1.8rem; font-weight: 300; letter-spacing: -1px; margin-bottom: 2rem; }
+                    .row { display: flex; justify-content: space-between; padding: 0.75rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+                    .row:last-child { border-bottom: none; }
+                    .label { color: var(--dim); text-transform: uppercase; letter-spacing: 1px; font-size: 0.7rem; }
+                    .value { color: var(--accent); }
+                    .dot { width: 8px; height: 8px; background: var(--accent); border-radius: 50%; display: inline-block; margin-right: 8px; }
                 </style>
             </head>
             <body>
-                <div class="container">
-                    <div class="grid">
-                        <div class="hero">
-                            <div class="label">System</div>
-                            <h1>Danrit Reader</h1>
-                        </div>
-                        <div class="cell">
-                            <div class="label">Status</div>
-                            <div class="value">Operational</div>
-                        </div>
-                        <div class="cell">
-                            <div class="label">Port</div>
-                            <div class="value">${PORT}</div>
-                        </div>
-                        <div class="cell">
-                            <div class="label">Engine</div>
-                            <div class="value">Stealth V3</div>
-                        </div>
-                        <div class="cell">
-                            <div class="label">Proxy</div>
-                            <div class="value">${process.env.PROXY_URL ? 'ACTIVE' : 'DIRECT'}</div>
-                        </div>
-                        <div class="cell">
-                            <div class="label">Uptime</div>
-                            <div class="value">${(process.uptime() / 60).toFixed(2)}m</div>
-                        </div>
-                        <div class="cell">
-                            <div style="display:flex; align-items:center">
-                                <span class="status-dot"></span>
-                                <span style="font-size:0.8rem; color:var(--dim)">SYSTEM READY</span>
-                            </div>
-                            <div style="font-size:0.8rem; color:var(--dim)">V 1.1.0</div>
-                        </div>
-                    </div>
+                <div class="card">
+                    <h1>DANRIT ENGINE <span style="color:var(--accent)">V2</span></h1>
+                    <div class="row"><span class="label">Status</span><span class="value"><span class="dot"></span>ONLINE</span></div>
+                    <div class="row"><span class="label">Port</span><span class="value">${PORT}</span></div>
+                    <div class="row"><span class="label">Scraper</span><span class="value">Conqueror V2</span></div>
+                    <div class="row"><span class="label">Crawler</span><span class="value">Spider V1</span></div>
+                    <div class="row"><span class="label">Video</span><span class="value">StreamJet V2</span></div>
+                    <div class="row"><span class="label">Proxy</span><span class="value">${process.env.PROXY_URL ? 'ACTIVE' : 'DIRECT'}</span></div>
+                    <div class="row"><span class="label">Uptime</span><span class="value">${(process.uptime() / 60).toFixed(1)}m</span></div>
                 </div>
             </body>
         </html>
     `);
 });
 
-// 2. Single Page Scrape
+// ============================================================
+// ROUTES: SCRAPER (Conqueror Mode)
+// ============================================================
+
 app.post('/v1/scrape', async (req, res) => {
     const { url, render, screenshot, waitFor } = req.body;
 
@@ -112,9 +101,17 @@ app.post('/v1/scrape', async (req, res) => {
         return;
     }
 
+    const startTime = Date.now();
     try {
-        const result = await scrapeUrl(url, { render, screenshot, waitFor });
-        res.json({ success: true, data: result });
+        console.log(`[🕵️ ENGINE] Scrape request: ${url}`);
+        const result = await scrapeUrl(url, { render, screenshot, waitFor, includeLinks: true });
+        const duration = Date.now() - startTime;
+
+        res.json({
+            success: true,
+            data: result,
+            meta: { duration_ms: duration, engine: 'conqueror-v2' }
+        });
     } catch (error) {
         console.error("Scrape Failed:", error);
         const msg = error instanceof Error ? error.message : "Unknown Error";
@@ -122,7 +119,10 @@ app.post('/v1/scrape', async (req, res) => {
     }
 });
 
-// 3. 🕷️ PHANTOM CRAWLER - Site-Wide Extraction
+// ============================================================
+// ROUTES: CRAWLER (Spider Mode)
+// ============================================================
+
 app.post('/v1/crawl', async (req, res) => {
     const { url, maxPages, maxDepth, render, screenshot, allowSubdomains } = req.body;
 
@@ -131,7 +131,9 @@ app.post('/v1/crawl', async (req, res) => {
         return;
     }
 
+    const startTime = Date.now();
     try {
+        console.log(`[🕷️ ENGINE] Crawl request: ${url} | Max: ${maxPages ?? 10} pages`);
         const result = await crawlUrl(url, {
             maxPages: maxPages ?? 10,
             maxDepth: maxDepth ?? 2,
@@ -139,7 +141,13 @@ app.post('/v1/crawl', async (req, res) => {
             screenshot: screenshot ?? false,
             allowSubdomains: allowSubdomains ?? false
         });
-        res.json({ success: true, data: result });
+        const duration = Date.now() - startTime;
+
+        res.json({
+            success: true,
+            data: result,
+            meta: { duration_ms: duration, engine: 'spider-v1' }
+        });
     } catch (error) {
         console.error("Crawl Failed:", error);
         const msg = error instanceof Error ? error.message : "Unknown Error";
@@ -147,13 +155,11 @@ app.post('/v1/crawl', async (req, res) => {
     }
 });
 
-// --- Routes ---
+// ============================================================
+// ROUTES: VIDEO INTELLIGENCE (StreamJet)
+// ============================================================
 
-// ... (existing routes)
-
-// 4. 🎥 VIDEO INTELLIGENCE
-import { getVideoInfo, getVideoStreamUrl } from './video.js';
-
+// Get metadata only
 app.post('/v1/video/info', async (req, res) => {
     const { url } = req.body;
     if (!url) {
@@ -161,6 +167,7 @@ app.post('/v1/video/info', async (req, res) => {
         return;
     }
     try {
+        console.log(`[🎥 ENGINE] Video Info: ${url}`);
         const info = await getVideoInfo(url);
         res.json({ success: true, data: info });
     } catch (error) {
@@ -170,6 +177,7 @@ app.post('/v1/video/info', async (req, res) => {
     }
 });
 
+// Get stream URL (legacy)
 app.post('/v1/video/download', async (req, res) => {
     const { url } = req.body;
     if (!url) {
@@ -177,10 +185,7 @@ app.post('/v1/video/download', async (req, res) => {
         return;
     }
     try {
-        // Resolve the direct stream URL
-        // In a real production app, you might want to proxy the stream through your server
-        // to avoid CORS or IP restrictions on the client side.
-        // For now, we return the direct URL.
+        console.log(`[🎥 ENGINE] Video Download URL: ${url}`);
         const streamUrl = await getVideoStreamUrl(url);
         res.json({ success: true, url: streamUrl });
     } catch (error) {
@@ -190,25 +195,74 @@ app.post('/v1/video/download', async (req, res) => {
     }
 });
 
+/**
+ * 🔥 THE KEY NEW ENDPOINT: Buffer Proxy Stream
+ * This solves the 403 problem forever.
+ * Railway downloads the video bytes and pipes them to the client.
+ */
+app.post('/v1/video/stream', async (req, res) => {
+    const { url } = req.body;
+    if (!url) {
+        res.status(400).json({ error: "Missing 'url' in body" });
+        return;
+    }
 
-// --- Error Handler ---
+    try {
+        console.log(`[🎥 STREAMJET] Buffer Proxy for: ${url}`);
+        const { stream, contentType, filename, filesize } = await streamVideo(url);
+
+        // Set headers for download
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        if (filesize) {
+            res.setHeader('Content-Length', String(filesize));
+        }
+
+        // Pipe the stream directly to the HTTP response
+        stream.pipe(res);
+
+        stream.on('error', (err) => {
+            console.error('[🎥 STREAMJET] Stream error:', err);
+            if (!res.headersSent) {
+                res.status(500).json({ error: 'Stream failed' });
+            }
+        });
+    } catch (error) {
+        console.error("Video Stream Failed:", error);
+        const msg = error instanceof Error ? error.message : "Unknown Error";
+        if (!res.headersSent) {
+            res.status(500).json({ success: false, error: msg });
+        }
+    }
+});
+
+// ============================================================
+// ERROR HANDLER
+// ============================================================
+
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
     console.error('[ERROR]', err.message);
     res.status(500).json({ success: false, error: 'Internal Server Error' });
 });
 
-// --- Start Server ---
+// ============================================================
+// START
+// ============================================================
+
 app.listen(PORT, () => {
     console.log(`
-    ╔═══════════════════════════════════════╗
-    ║      DANRIT READER V1.2               ║
-    ╠═══════════════════════════════════════╣
-    ║  Port:     ${String(PORT).padEnd(27)}║
-    ║  Mode:     Stealth + Crawler + Video  ║
-    ║  Health:   /health                    ║
-    ║  API:      POST /v1/scrape            ║
-    ║  API:      POST /v1/crawl             ║
-    ║  API:      POST /v1/video/*           ║
-    ╚═══════════════════════════════════════╝
+    ╔═══════════════════════════════════════════╗
+    ║       DANRIT ENGINE V2.0                  ║
+    ╠═══════════════════════════════════════════╣
+    ║  Port:     ${String(PORT).padEnd(31)}║
+    ║  Scraper:  Conqueror V2 (Stealth)        ║
+    ║  Crawler:  Spider V1 (Recursive)         ║
+    ║  Video:    StreamJet V2 (Buffer Proxy)   ║
+    ╠═══════════════════════════════════════════╣
+    ║  POST /v1/scrape      → Single Page      ║
+    ║  POST /v1/crawl       → Full Site        ║
+    ║  POST /v1/video/info  → Metadata         ║
+    ║  POST /v1/video/stream → 🔥 DOWNLOAD     ║
+    ╚═══════════════════════════════════════════╝
     `);
 });
